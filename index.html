@@ -154,7 +154,7 @@
     <h2>Add Metrics Endpoint</h2>
     <div class="form-group">
       <label>Display Name</label>
-      <input type="text" id="modal-name" placeholder="e.g. Cohere C4AI Production" />
+      <input type="text" id="modal-name" placeholder="e.g. My LLM Endpoint" />
     </div>
     <div class="form-group">
       <label>Metrics URL</label>
@@ -190,9 +190,10 @@
 
 <div class="container" id="main-content">
   <div class="empty-state" id="empty-state">
-    <h2>No endpoints configured</h2>
-    <p>Add a vLLM metrics endpoint to get started.</p>
-    <button class="btn btn-primary" onclick="openModal()">＋ Add Endpoint</button>
+    <h2>BUZZ Dedicated LLM Endpoint Inference Dashboard</h2>
+    <p>Monitor real-time throughput, latency, KV cache, and request metrics for your dedicated LLM inference endpoints.</p>
+    <p style="margin-top:12px;margin-bottom:24px;font-size:13px;color:#3a4070;">To get started, find your metrics URL in the <strong style="color:#6080c0">BUZZ LLM Inference Console</strong> under your dedicated endpoint's details, then add it below.</p>
+    <button class="btn btn-primary" onclick="openModal()">＋ Add Metrics Endpoint</button>
   </div>
 
   <div id="dashboard" style="display:none">
@@ -292,10 +293,6 @@ function saveEndpoints(eps) {
 }
 
 let endpoints = loadEndpoints();
-if (endpoints.length === 0) {
-  endpoints = [{ id: uid(), name: 'Cohere C4AI', url: 'https://cohere-c4ai-3e1ds.inference.buzzperformancecloud.com/metrics' }];
-  saveEndpoints(endpoints);
-}
 
 let activeId = endpoints[0]?.id || null;
 let compareMode = false;
