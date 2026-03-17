@@ -12,7 +12,7 @@ Your metrics URL is available in the **BUZZ LLM Inference Console** on the detai
 
 ![Where to find your metrics endpoint in the BUZZ Console](docs/metrics-endpoint.png)
 
-1. Log in to [console.buzzhpc.ai](https://console.buzzhpc.ai)
+1. Log in to [cloud.buzzhpc.ai](https://cloud.buzzhpc.ai)
 2. Navigate to **LLM Inference** → select your dedicated endpoint
 3. On the endpoint detail page, copy the **Metrics URL** (ends in `/metrics`)
 4. Open the [dashboard](https://buzzhpc.github.io/llm-dashboard/), click **＋ Add Metrics Endpoint**, paste the URL, and click **Add Endpoint**
