@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BUZZ Dedicated LLM Endpoint Inference Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f1117; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  /* ── Header ── */
+  header {
+    background: #1a1d2e; border-bottom: 1px solid #2d3148;
+    padding: 0 24px; display: flex; align-items: stretch; gap: 0;
+  }
+  .header-left { display: flex; align-items: center; gap: 16px; padding: 14px 0; flex: 1; min-width: 0; }
+  header h1 { font-size: 17px; font-weight: 600; color: #fff; white-space: nowrap; }
+  .model-badge { font-size: 12px; color: #7c85b0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+  .header-right { display: flex; align-items: center; gap: 12px; padding: 14px 0; }
+  .status-pill { display: flex; align-items: center; gap: 8px; background: #1e2235; border-radius: 20px; padding: 6px 14px; font-size: 13px; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; flex-shrink: 0; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+  .dot.error { background: #ef4444; animation: none; }
+  .dot.warn { background: #eab308; }
+  #last-updated { font-size: 11px; color: #4a5080; white-space: nowrap; }
+
+  /* ── Endpoint tabs bar ── */
+  .endpoint-bar {
+    background: #13151f; border-bottom: 1px solid #2d3148;
+    padding: 0 24px; display: flex; align-items: center; gap: 4px; overflow-x: auto;
+  }
+  .endpoint-tabs { display: flex; gap: 2px; flex: 1; overflow-x: auto; padding: 8px 0; }
+  .ep-tab {
+    display: flex; align-items: center; gap: 8px;
+    background: #1e2235; border: 1px solid #2d3148; border-radius: 8px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer; white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s; color: #9aa0c0; user-select: none;
+  }
+  .ep-tab:hover { background: #252840; }
+  .ep-tab.active { background: #252840; border-color: #4f60a0; color: #fff; }
+  .ep-tab.compare-selected { border-color: #f97316; background: #251e13; color: #fbbf7c; }
+  .ep-tab.compare-selected.active { border-color: #f97316; }
+  .ep-tab .ep-dot { width: 6px; height: 6px; border-radius: 50%; background: #4a5080; flex-shrink: 0; }
+  .ep-tab.active .ep-dot { background: #22c55e; }
+  .ep-tab.ep-error .ep-dot { background: #ef4444; }
+  .ep-tab .ep-remove { margin-left: 4px; color: #4a5080; font-size: 14px; line-height: 1; padding: 0 2px; }
+  .ep-tab .ep-remove:hover { color: #ef4444; }
+  .ep-tab .ep-check { margin-right: 2px; font-size: 13px; color: #f97316; }
+  .btn-add-ep {
+    display: flex; align-items: center; gap: 6px;
+    background: none; border: 1px dashed #3a3f60; border-radius: 8px;
+    padding: 6px 12px; font-size: 12px; color: #6070a0; cursor: pointer;
+    white-space: nowrap; transition: border-color 0.15s, color 0.15s; margin: 8px 0 8px 8px;
+  }
+  .btn-add-ep:hover { border-color: #5060a0; color: #a0b0e0; }
+  .btn-compare-ep {
+    display: flex; align-items: center; gap: 6px;
+    background: none; border: 1px dashed #3a3f60; border-radius: 8px;
+    padding: 6px 12px; font-size: 12px; color: #6070a0; cursor: pointer;
+    white-space: nowrap; transition: border-color 0.15s, color 0.15s, background 0.15s; margin: 8px 0 8px 4px;
+  }
+  .btn-compare-ep:hover { border-color: #f97316; color: #fbbf7c; }
+  .btn-compare-ep.active { background: #251e13; border-color: #f97316; border-style: solid; color: #fbbf7c; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: #1a1d2e; border: 1px solid #2d3148; border-radius: 14px;
+    padding: 28px; width: 480px; max-width: 95vw;
+  }
+  .modal h2 { font-size: 16px; color: #fff; margin-bottom: 20px; }
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-size: 12px; color: #7c85b0; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .form-group input {
+    width: 100%; background: #0f1117; border: 1px solid #2d3148; border-radius: 8px;
+    padding: 10px 14px; color: #e2e8f0; font-size: 14px; outline: none;
+    transition: border-color 0.15s;
+  }
+  .form-group input:focus { border-color: #4f60a0; }
+  .form-group input::placeholder { color: #4a5080; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+  .btn { padding: 9px 20px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; }
+  .btn-primary { background: #3b5bdb; color: #fff; }
+  .btn-primary:hover { background: #4c6ef5; }
+  .btn-secondary { background: #1e2235; color: #9aa0c0; border: 1px solid #2d3148; }
+  .btn-secondary:hover { background: #252840; }
+
+  /* ── Layout ── */
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+  /* ── Stat cards ── */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: #1a1d2e; border: 1px solid #2d3148; border-radius: 12px; padding: 20px; position: relative; overflow: hidden; }
+  .stat-card .label { font-size: 11px; color: #7c85b0; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .stat-card .value { font-size: 32px; font-weight: 700; color: #fff; line-height: 1; }
+  .stat-card .sub { font-size: 12px; color: #7c85b0; margin-top: 6px; }
+  .stat-card .accent { position: absolute; top: 0; left: 0; width: 3px; height: 100%; border-radius: 12px 0 0 12px; }
+  .accent-green{background:#22c55e}.accent-blue{background:#3b82f6}.accent-purple{background:#a855f7}
+  .accent-orange{background:#f97316}.accent-yellow{background:#eab308}.accent-cyan{background:#06b6d4}
+
+  /* ── Sparklines ── */
+  .sparkline-row { display: flex; gap: 16px; margin-bottom: 24px; }
+  .sparkline-card { flex: 1; background: #1a1d2e; border: 1px solid #2d3148; border-radius: 12px; padding: 16px; }
+  .sparkline-card h3 { font-size: 11px; color: #7c85b0; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .sparkline-card .big { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .sparkline-wrap { height: 60px; }
+
+  /* ── Charts ── */
+  .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .chart-card { background: #1a1d2e; border: 1px solid #2d3148; border-radius: 12px; padding: 20px; }
+  .chart-card.full { grid-column: 1 / -1; }
+  .chart-card h3 { font-size: 13px; font-weight: 600; color: #a0a8c8; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .chart-wrap { position: relative; height: 220px; }
+  .chart-wrap.tall { height: 200px; }
+
+  /* ── Bottom grid ── */
+  .bottom-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .health-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .health-healthy { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+  .health-warning { background: rgba(234,179,8,0.15); color: #eab308; border: 1px solid rgba(234,179,8,0.3); }
+  .health-error { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: #7c85b0; font-weight: 500; padding: 8px 0; border-bottom: 1px solid #2d3148; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  td { padding: 10px 0; border-bottom: 1px solid #1e2235; color: #c8cfe8; }
+  td:last-child { text-align: right; color: #fff; font-weight: 600; }
+  .progress-bar-bg { background: #2d3148; border-radius: 4px; height: 6px; margin-top: 8px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+
+  /* ── Compare overlay banner ── */
+  .compare-banner {
+    display: none; background: #1c1608; border: 1px solid #5a3a00; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: #fbbf7c;
+    align-items: center; gap: 10px;
+  }
+  .compare-banner.visible { display: flex; }
+  .compare-banner span { flex: 1; }
+
+  /* ── Empty state ── */
+  .empty-state { text-align: center; padding: 80px 20px; color: #4a5080; }
+  .empty-state h2 { font-size: 20px; color: #6070a0; margin-bottom: 8px; }
+  .empty-state p { font-size: 14px; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+
+<!-- Add Endpoint Modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <h2>Add Metrics Endpoint</h2>
+    <div class="form-group">
+      <label>Display Name</label>
+      <input type="text" id="modal-name" placeholder="e.g. Cohere C4AI Production" />
+    </div>
+    <div class="form-group">
+      <label>Metrics URL</label>
+      <input type="text" id="modal-url" placeholder="https://your-endpoint.com/metrics" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="addEndpoint()">Add Endpoint</button>
+    </div>
+  </div>
+</div>
+
+<header>
+  <div class="header-left">
+    <h1>BUZZ Dedicated LLM Endpoint Inference Dashboard</h1>
+    <div class="model-badge" id="model-name">—</div>
+  </div>
+  <div class="header-right">
+    <div class="status-pill">
+      <div class="dot" id="status-dot"></div>
+      <span id="status-text">—</span>
+    </div>
+    <div id="last-updated">—</div>
+  </div>
+</header>
+
+<!-- Endpoint tabs -->
+<div class="endpoint-bar">
+  <div class="endpoint-tabs" id="endpoint-tabs"></div>
+  <button class="btn-add-ep" onclick="openModal()">＋ Add Endpoint</button>
+  <button class="btn-compare-ep" id="compare-btn" onclick="toggleCompare()">⊕ Compare</button>
+</div>
+
+<div class="container" id="main-content">
+  <div class="empty-state" id="empty-state">
+    <h2>No endpoints configured</h2>
+    <p>Add a vLLM metrics endpoint to get started.</p>
+    <button class="btn btn-primary" onclick="openModal()">＋ Add Endpoint</button>
+  </div>
+
+  <div id="dashboard" style="display:none">
+    <!-- Compare banner -->
+    <div class="compare-banner" id="compare-banner">
+      <span id="compare-banner-text">Select endpoints from the tab bar to compare them on the charts below.</span>
+    </div>
+
+    <!-- Stat Cards (hidden in compare mode) -->
+    <div id="single-view">
+      <div class="stat-grid">
+        <div class="stat-card"><div class="accent accent-green"></div><div class="label">Requests Running</div><div class="value" id="requests-running">—</div><div class="sub">active in engine</div></div>
+        <div class="stat-card"><div class="accent accent-yellow"></div><div class="label">Requests Waiting</div><div class="value" id="requests-waiting">—</div><div class="sub">in queue</div></div>
+        <div class="stat-card"><div class="accent accent-blue"></div><div class="label">KV Cache Usage</div><div class="value" id="kv-cache">—</div><div class="sub">of available cache</div><div class="progress-bar-bg"><div class="progress-bar-fill" id="kv-bar" style="background:#3b82f6;width:0%"></div></div></div>
+        <div class="stat-card"><div class="accent accent-purple"></div><div class="label">Prefix Cache Hit Rate</div><div class="value" id="cache-hit-rate">—</div><div class="sub">tokens served from cache</div><div class="progress-bar-bg"><div class="progress-bar-fill" id="cache-bar" style="background:#a855f7;width:0%"></div></div></div>
+        <div class="stat-card"><div class="accent accent-orange"></div><div class="label">Avg TTFT</div><div class="value" id="avg-ttft">—</div><div class="sub">time to first token</div></div>
+        <div class="stat-card"><div class="accent accent-cyan"></div><div class="label">Avg E2E Latency</div><div class="value" id="avg-e2e">—</div><div class="sub">end-to-end request</div></div>
+      </div>
+
+      <!-- Sparklines -->
+      <div class="sparkline-row">
+        <div class="sparkline-card"><h3>Prompt Tokens / sec</h3><div class="big" id="prompt-tps">—</div><div class="sparkline-wrap"><canvas id="sparkline-prompt"></canvas></div></div>
+        <div class="sparkline-card"><h3>Generation Tokens / sec</h3><div class="big" id="gen-tps">—</div><div class="sparkline-wrap"><canvas id="sparkline-gen"></canvas></div></div>
+        <div class="sparkline-card"><h3>Requests / sec</h3><div class="big" id="req-per-sec">—</div><div class="sparkline-wrap"><canvas id="sparkline-req"></canvas></div></div>
+        <div class="sparkline-card"><h3>KV Cache %</h3><div class="big" id="kv-sparkline-val">—</div><div class="sparkline-wrap"><canvas id="sparkline-kv"></canvas></div></div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-grid">
+      <div class="chart-card" id="card-outcomes"><h3>Request Outcomes (lifetime)</h3><div class="chart-wrap"><canvas id="chart-outcomes"></canvas></div></div>
+      <div class="chart-card" id="card-ttft"><h3>TTFT Distribution</h3><div class="chart-wrap"><canvas id="chart-ttft"></canvas></div></div>
+      <div class="chart-card" id="card-e2e"><h3>E2E Latency Distribution</h3><div class="chart-wrap"><canvas id="chart-e2e"></canvas></div></div>
+      <div class="chart-card" id="card-prompt-dist"><h3>Prompt Token Size Distribution</h3><div class="chart-wrap"><canvas id="chart-prompt-dist"></canvas></div></div>
+      <div class="chart-card full"><h3>Active Requests &amp; Queue — Live</h3><div class="chart-wrap tall"><canvas id="chart-timeseries"></canvas></div></div>
+      <!-- Compare-only charts (hidden by default) -->
+      <div class="chart-card full" id="card-compare-gen" style="display:none"><h3>Generation Tokens/sec — Comparison</h3><div class="chart-wrap tall"><canvas id="chart-compare-gen"></canvas></div></div>
+      <div class="chart-card full" id="card-compare-kv" style="display:none"><h3>KV Cache % — Comparison</h3><div class="chart-wrap tall"><canvas id="chart-compare-kv"></canvas></div></div>
+    </div>
+
+    <!-- Bottom (hidden in compare mode) -->
+    <div class="bottom-grid" id="bottom-grid">
+      <div class="chart-card">
+        <h3>Health Checks</h3>
+        <table>
+          <tr><th>Signal</th><th>Status</th></tr>
+          <tr><td>Engine State</td><td><span class="health-badge health-healthy" id="hc-engine">—</span></td></tr>
+          <tr><td>Queue Backlog</td><td><span class="health-badge health-healthy" id="hc-queue">—</span></td></tr>
+          <tr><td>Preemptions</td><td><span class="health-badge health-healthy" id="hc-preempt">—</span></td></tr>
+          <tr><td>Error Rate</td><td><span class="health-badge health-healthy" id="hc-errors">—</span></td></tr>
+          <tr><td>Weights Offloaded</td><td><span class="health-badge health-healthy" id="hc-weights">—</span></td></tr>
+        </table>
+      </div>
+      <div class="chart-card">
+        <h3>Lifetime Totals</h3>
+        <table>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Total Requests</td><td id="lt-total">—</td></tr>
+          <tr><td>Prompt Tokens</td><td id="lt-prompt">—</td></tr>
+          <tr><td>Generation Tokens</td><td id="lt-gen">—</td></tr>
+          <tr><td>Avg Prompt Length</td><td id="lt-avg-prompt">—</td></tr>
+          <tr><td>Avg Response Length</td><td id="lt-avg-gen">—</td></tr>
+        </table>
+      </div>
+      <div class="chart-card">
+        <h3>Process Info</h3>
+        <table>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Uptime</td><td id="pi-uptime">—</td></tr>
+          <tr><td>CPU Time</td><td id="pi-cpu">—</td></tr>
+          <tr><td>RSS Memory</td><td id="pi-rss">—</td></tr>
+          <tr><td>Virtual Memory</td><td id="pi-vmem">—</td></tr>
+          <tr><td>Open FDs</td><td id="pi-fds">—</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Constants ─────────────────────────────────────────────────────
+const STORAGE_KEY = 'vllm_endpoints';
+const POLL_INTERVAL = 5000;
+const MAX_POINTS = 600;
+
+// Per-endpoint chart colors for compare mode
+const EP_COLORS = [
+  '#3b82f6','#f97316','#22c55e','#a855f7','#06b6d4','#eab308','#ef4444','#ec4899',
+];
+
+// ── Endpoint management ───────────────────────────────────────────
+function loadEndpoints() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
+}
+function saveEndpoints(eps) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(eps));
+}
+
+let endpoints = loadEndpoints();
+if (endpoints.length === 0) {
+  endpoints = [{ id: uid(), name: 'Cohere C4AI', url: 'https://cohere-c4ai-3e1ds.inference.buzzperformancecloud.com/metrics' }];
+  saveEndpoints(endpoints);
+}
+
+let activeId = endpoints[0]?.id || null;
+let compareMode = false;
+let compareSelected = new Set(); // ids selected for comparison
+const endpointStatus = {};
+
+// Per-endpoint state: plain value arrays + prev counters
+const epState = {};
+function getState(id) {
+  if (!epState[id]) {
+    epState[id] = {
+      prev: null, prevTime: null,
+      tsRunning: [],
+      tsWaiting: [],
+      spPrompt:  [],
+      spGen:     [],
+      spReq:     [],
+      spKv:      [],
+    };
+  }
+  return epState[id];
+}
+
+function uid() { return Math.random().toString(36).slice(2); }
+
+function pushVal(arr, v) {
+  arr.push(v);
+  if (arr.length > MAX_POINTS) arr.shift();
+}
+
+function sliceForDisplay(arr) {
+  return arr.slice(-MAX_POINTS);
+}
+
+// ── Modal ─────────────────────────────────────────────────────────
+function openModal() {
+  document.getElementById('modal-name').value = '';
+  document.getElementById('modal-url').value = '';
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('modal-name').focus(), 50);
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+function addEndpoint() {
+  const name = document.getElementById('modal-name').value.trim();
+  const url  = document.getElementById('modal-url').value.trim();
+  if (!name || !url) { alert('Please fill in both fields.'); return; }
+  const ep = { id: uid(), name, url };
+  endpoints.push(ep);
+  saveEndpoints(endpoints);
+  closeModal();
+  renderTabs();
+  switchTo(ep.id);
+}
+
+function removeEndpoint(id) {
+  endpoints = endpoints.filter(e => e.id !== id);
+  saveEndpoints(endpoints);
+  delete epState[id];
+  compareSelected.delete(id);
+  if (activeId === id) activeId = endpoints[0]?.id || null;
+  renderTabs();
+  if (activeId) switchTo(activeId);
+  else showEmpty();
+}
+
+// ── Compare mode ──────────────────────────────────────────────────
+function toggleCompare() {
+  compareMode = !compareMode;
+  const btn = document.getElementById('compare-btn');
+  btn.classList.toggle('active', compareMode);
+  if (!compareMode) {
+    compareSelected.clear();
+    exitCompareView();
+  } else {
+    // Auto-select active endpoint
+    compareSelected.add(activeId);
+    enterCompareView();
+  }
+  renderTabs();
+}
+
+function enterCompareView() {
+  document.getElementById('single-view').style.display = 'none';
+  document.getElementById('bottom-grid').style.display = 'none';
+  document.getElementById('card-outcomes').style.display = 'none';
+  document.getElementById('card-ttft').style.display = 'none';
+  document.getElementById('card-e2e').style.display = 'none';
+  document.getElementById('card-prompt-dist').style.display = 'none';
+  document.getElementById('card-compare-gen').style.display = '';
+  document.getElementById('card-compare-kv').style.display = '';
+  document.getElementById('compare-banner').classList.add('visible');
+  renderCompareCharts();
+}
+
+function exitCompareView() {
+  document.getElementById('single-view').style.display = '';
+  document.getElementById('bottom-grid').style.display = '';
+  document.getElementById('card-outcomes').style.display = '';
+  document.getElementById('card-ttft').style.display = '';
+  document.getElementById('card-e2e').style.display = '';
+  document.getElementById('card-prompt-dist').style.display = '';
+  document.getElementById('card-compare-gen').style.display = 'none';
+  document.getElementById('card-compare-kv').style.display = 'none';
+  document.getElementById('compare-banner').classList.remove('visible');
+  // Re-render single view
+  resetChartsFromState(getState(activeId));
+}
+
+function toggleCompareSelect(id) {
+  if (compareSelected.has(id)) {
+    if (compareSelected.size > 1) compareSelected.delete(id);
+  } else {
+    compareSelected.add(id);
+  }
+  renderTabs();
+  updateCompareBanner();
+  renderCompareCharts();
+}
+
+function updateCompareBanner() {
+  const names = [...compareSelected].map(id => endpoints.find(e=>e.id===id)?.name || id);
+  document.getElementById('compare-banner-text').textContent =
+    names.length <= 1
+      ? 'Select more endpoints from the tab bar to compare.'
+      : `Comparing: ${names.join(' vs ')}`;
+}
+
+// ── Tab rendering ─────────────────────────────────────────────────
+function renderTabs() {
+  const container = document.getElementById('endpoint-tabs');
+  container.innerHTML = '';
+  endpoints.forEach(ep => {
+    const isActive = ep.id === activeId;
+    const isCompSel = compareMode && compareSelected.has(ep.id);
+    const tab = document.createElement('div');
+    tab.className = 'ep-tab'
+      + (isActive && !compareMode ? ' active' : '')
+      + (endpointStatus[ep.id] === 'error' ? ' ep-error' : '')
+      + (isCompSel ? ' compare-selected' : '');
+    tab.innerHTML =
+      (isCompSel ? `<span class="ep-check">✓</span>` : `<span class="ep-dot"></span>`)
+      + `<span>${escHtml(ep.name)}</span>`
+      + `<span class="ep-remove" title="Remove">×</span>`;
+    tab.addEventListener('click', e => {
+      if (e.target.classList.contains('ep-remove')) { removeEndpoint(ep.id); return; }
+      if (compareMode) { toggleCompareSelect(ep.id); return; }
+      switchTo(ep.id);
+    });
+    container.appendChild(tab);
+  });
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function showEmpty() {
+  document.getElementById('empty-state').style.display = '';
+  document.getElementById('dashboard').style.display = 'none';
+}
+
+function switchTo(id) {
+  activeId = id;
+  renderTabs();
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('dashboard').style.display = '';
+  resetChartsFromState(getState(id));
+  fetchAndUpdate();
+}
+
+function renderCompareCharts() {
+  if (!chartsReady) return;
+  updateCompareBanner();
+  const ids = [...compareSelected];
+
+  // Time series: Running requests per endpoint
+  const tsDatasets = [];
+  ids.forEach((id, i) => {
+    const s = getState(id);
+    const ep = endpoints.find(e=>e.id===id);
+    const color = EP_COLORS[i % EP_COLORS.length];
+    const pts = sliceForDisplay(s.tsRunning);
+    tsDatasets.push({
+      label: (ep?.name || id) + ' – Running',
+      data: pts,
+      borderColor: color, backgroundColor: color+'20',
+      fill: false, tension: 0.4, pointRadius: 0,
+    });
+  });
+  tsChart.data.labels = tsDatasets[0] ? tsDatasets[0].data.map(() => '') : [];
+  tsChart.data.datasets = tsDatasets;
+  tsChart.options.scales.x = { ticks: { color: textColor, maxTicksLimit: 10, font: { size: 10 } }, grid: { color: gridColor } };
+  tsChart.update('none');
+
+  // Gen TPS comparison
+  const genChart = Chart.getChart(document.getElementById('chart-compare-gen'));
+  const genDatasets = ids.map((id, i) => {
+    const s = getState(id);
+    const ep = endpoints.find(e=>e.id===id);
+    const color = EP_COLORS[i % EP_COLORS.length];
+    const pts = sliceForDisplay(s.spGen);
+    return {
+      label: ep?.name || id,
+      data: pts,
+      borderColor: color, backgroundColor: color+'20',
+      fill: false, tension: 0.4, pointRadius: 0,
+    };
+  });
+  if (genChart) {
+    genChart.data.labels = genDatasets[0] ? genDatasets[0].data.map(() => '') : [];
+    genChart.data.datasets = genDatasets;
+    genChart.options.scales.x = { ticks: { color: textColor, maxTicksLimit: 10, font: { size: 10 } }, grid: { color: gridColor } };
+    genChart.update('none');
+  }
+
+  // KV cache comparison
+  const kvChart = Chart.getChart(document.getElementById('chart-compare-kv'));
+  const kvDatasets = ids.map((id, i) => {
+    const s = getState(id);
+    const ep = endpoints.find(e=>e.id===id);
+    const color = EP_COLORS[i % EP_COLORS.length];
+    const pts = sliceForDisplay(s.spKv);
+    return {
+      label: ep?.name || id,
+      data: pts,
+      borderColor: color, backgroundColor: color+'20',
+      fill: false, tension: 0.4, pointRadius: 0,
+    };
+  });
+  if (kvChart) {
+    kvChart.data.labels = kvDatasets[0] ? kvDatasets[0].data.map(() => '') : [];
+    kvChart.data.datasets = kvDatasets;
+    kvChart.options.scales.x = { ticks: { color: textColor, maxTicksLimit: 10, font: { size: 10 } }, grid: { color: gridColor } };
+    kvChart.update('none');
+  }
+}
+
+// ── Charts ─────────────────────────────────────────────────────────
+let tsChart, outcomesChart, ttftChart, e2eChart, promptDistChart;
+let sparkPrompt, sparkGen, sparkReq, sparkKv;
+let compareGenChart, compareKvChart;
+let chartsReady = false;
+
+function makeSparkline(id, color) {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  const existing = Chart.getChart(el);
+  if (existing) existing.destroy();
+  return new Chart(el, {
+    type: 'line',
+    data: { labels: [], datasets: [{ data: [], borderColor: color, borderWidth: 1.5, fill: true, backgroundColor: color+'22', tension: 0.4, pointRadius: 0 }] },
+    options: { animation: false, responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false, beginAtZero: true } } }
+  });
+}
+
+const gridColor = '#2d3148', textColor = '#7c85b0';
+
+function initCharts() {
+  ['sparkline-prompt','sparkline-gen','sparkline-req','sparkline-kv'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { const c = Chart.getChart(el); if (c) c.destroy(); }
+  });
+  sparkPrompt = makeSparkline('sparkline-prompt', '#3b82f6');
+  sparkGen    = makeSparkline('sparkline-gen', '#a855f7');
+  sparkReq    = makeSparkline('sparkline-req', '#22c55e');
+  sparkKv     = makeSparkline('sparkline-kv', '#f97316');
+
+  const destroyAndCreate = (id, config) => {
+    const el = document.getElementById(id);
+    const existing = Chart.getChart(el);
+    if (existing) existing.destroy();
+    return new Chart(el, config);
+  };
+
+  tsChart = destroyAndCreate('chart-timeseries', {
+    type: 'line',
+    data: { labels: [], datasets: [
+      { label: 'Running', data: [], borderColor: '#3b82f6', backgroundColor: '#3b82f620', fill: true, tension: 0.4, pointRadius: 0 },
+      { label: 'Waiting', data: [], borderColor: '#f97316', backgroundColor: '#f9731620', fill: true, tension: 0.4, pointRadius: 0 },
+    ]},
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: { legend: { labels: { color: textColor, font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { color: textColor, maxTicksLimit: 10, font: { size: 10 } }, grid: { color: gridColor } },
+        y: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor }, beginAtZero: true,
+             title: { display: true, text: 'Requests', color: textColor, font: { size: 10 } } }
+      }
+    }
+  });
+
+  outcomesChart = destroyAndCreate('chart-outcomes', {
+    type: 'doughnut',
+    data: { labels: ['Completed (stop)', 'Hit length limit', 'Aborted', 'Error'],
+      datasets: [{ data: [0,0,0,0], backgroundColor: ['#22c55e','#eab308','#f97316','#ef4444'], borderWidth: 0, hoverOffset: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { color: textColor, font: { size: 11 }, boxWidth: 12 } } } }
+  });
+
+  const histOpts = (xLabel) => ({
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: textColor, font: { size: 10 }, maxRotation: 45 }, grid: { color: gridColor },
+           title: { display: true, text: xLabel, color: textColor, font: { size: 10 } } },
+      y: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor }, beginAtZero: true,
+           title: { display: true, text: 'Requests', color: textColor, font: { size: 10 } } }
+    }
+  });
+
+  ttftChart = destroyAndCreate('chart-ttft', {
+    type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: '#3b82f680', borderColor: '#3b82f6', borderWidth: 1 }] },
+    options: histOpts('TTFT (seconds)')
+  });
+  e2eChart = destroyAndCreate('chart-e2e', {
+    type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: '#a855f780', borderColor: '#a855f7', borderWidth: 1 }] },
+    options: histOpts('E2E Latency (seconds)')
+  });
+  promptDistChart = destroyAndCreate('chart-prompt-dist', {
+    type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: '#06b6d480', borderColor: '#06b6d4', borderWidth: 1 }] },
+    options: histOpts('Prompt Tokens')
+  });
+
+  const compareLineOpts = (yLabel) => ({
+    animation: false, responsive: true, maintainAspectRatio: false,
+    interaction: { intersect: false, mode: 'index' },
+    plugins: { legend: { labels: { color: textColor, font: { size: 11 } } } },
+    scales: {
+      x: { ticks: { color: textColor, maxTicksLimit: 10, font: { size: 10 } }, grid: { color: gridColor } },
+      y: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor }, beginAtZero: true,
+           title: { display: true, text: yLabel, color: textColor, font: { size: 10 } } }
+    }
+  });
+
+  compareGenChart = destroyAndCreate('chart-compare-gen', {
+    type: 'line', data: { labels: [], datasets: [] },
+    options: compareLineOpts('Tokens/sec')
+  });
+  compareKvChart = destroyAndCreate('chart-compare-kv', {
+    type: 'line', data: { labels: [], datasets: [] },
+    options: compareLineOpts('KV Cache %')
+  });
+
+  chartsReady = true;
+}
+
+function resetChartsFromState(s) {
+  if (!chartsReady) { initCharts(); return; }
+  const running = sliceForDisplay(s.tsRunning);
+  const waiting = sliceForDisplay(s.tsWaiting);
+  tsChart.options.scales.x = { ticks: { color: textColor, maxTicksLimit: 10, font: { size: 10 } }, grid: { color: gridColor } };
+  tsChart.data.labels = running.map(() => '');
+  tsChart.data.datasets = [
+    { label: 'Running', data: running, borderColor: '#3b82f6', backgroundColor: '#3b82f620', fill: true, tension: 0.4, pointRadius: 0 },
+    { label: 'Waiting', data: waiting, borderColor: '#f97316', backgroundColor: '#f9731620', fill: true, tension: 0.4, pointRadius: 0 },
+  ];
+  tsChart.update('none');
+  // Sparklines
+  [[sparkPrompt, s.spPrompt],[sparkGen, s.spGen],[sparkReq, s.spReq],[sparkKv, s.spKv]].forEach(([ch, arr]) => {
+    if (!ch) return;
+    const vals = sliceForDisplay(arr);
+    ch.data.labels = vals.map(() => '');
+    ch.data.datasets[0].data = vals;
+    ch.update('none');
+  });
+}
+
+// ── Metrics parsing ───────────────────────────────────────────────
+function parseMetrics(text) {
+  const m = {};
+  for (const line of text.split('\n')) {
+    if (line.startsWith('#') || !line.trim()) continue;
+    const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)\{([^}]*)\}\s+([\d.e+\-inf]+)/i)
+               || line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)\s+([\d.e+\-inf]+)/i);
+    if (!match) continue;
+    const key = match[1];
+    const labels = match[2] && match[3] ? match[2] : '';
+    const val = parseFloat(match[match.length === 4 ? 3 : 2]);
+    const fullKey = labels ? `${key}{${labels}}` : key;
+    m[fullKey] = val;
+    if (!m[key]) m[key] = val;
+  }
+  return m;
+}
+
+function get(m, pattern) {
+  for (const k of Object.keys(m)) { if (k.includes(pattern)) return m[k]; }
+  return 0;
+}
+
+function fmt(n, decimals=1) {
+  if (n >= 1e9) return (n/1e9).toFixed(1)+'B';
+  if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'K';
+  return n.toFixed(decimals);
+}
+
+function fmtDuration(s) {
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), ss=Math.floor(s%60);
+  if(h>0) return `${h}h ${m}m`;
+  if(m>0) return `${m}m ${ss}s`;
+  return `${ss}s`;
+}
+
+function extractHistogram(m, baseName) {
+  const buckets = [];
+  for (const [k, v] of Object.entries(m)) {
+    const match = k.match(new RegExp(`${baseName}_bucket.*le="([^"]+)"`));
+    if (match) {
+      const le = match[1] === '+Inf' ? Infinity : parseFloat(match[1]);
+      buckets.push({ le, count: v });
+    }
+  }
+  return buckets.sort((a, b) => a.le - b.le);
+}
+
+function bucketsToBarData(buckets, maxBuckets=12) {
+  const filtered = buckets.filter(b => b.le !== Infinity).slice(0, maxBuckets);
+  const labels=[], data=[];
+  let prev=0;
+  for (const b of filtered) {
+    labels.push(b.le>=1000?(b.le/1000).toFixed(0)+'K':b.le.toString());
+    data.push(b.count - prev);
+    prev = b.count;
+  }
+  return { labels, data };
+}
+
+function setBadge(id, text, type) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = `health-badge health-${type}`;
+}
+
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+// ── Main fetch/update loop ────────────────────────────────────────
+let pollTimer = null;
+
+function fetchAndUpdate() {
+  if (pollTimer) clearTimeout(pollTimer);
+  if (!activeId) return;
+  const ep = endpoints.find(e => e.id === activeId);
+  if (!ep) return;
+  // Also background-fetch any compare-selected endpoints so history accumulates
+  if (compareMode) {
+    compareSelected.forEach(id => {
+      if (id !== activeId) {
+        const cep = endpoints.find(e=>e.id===id);
+        if (cep) _doFetch(cep, false);
+      }
+    });
+  }
+  _doFetch(ep, true).finally(() => {
+    pollTimer = setTimeout(fetchAndUpdate, POLL_INTERVAL);
+  });
+}
+
+async function _doFetch(ep, updateUI) {
+  const now = Date.now();
+  let text;
+  try {
+    const resp = await fetch(ep.url, { cache: 'no-store' });
+    text = await resp.text();
+    endpointStatus[ep.id] = 'ok';
+  } catch(e) {
+    endpointStatus[ep.id] = 'error';
+    if (updateUI) {
+      renderTabs();
+      document.getElementById('status-dot').className = 'dot error';
+      document.getElementById('status-text').textContent = 'Fetch failed';
+    }
+    return;
+  }
+
+  if (updateUI && ep.id !== activeId) return;
+
+  endpointStatus[ep.id] = 'ok';
+  if (updateUI) renderTabs();
+
+  const m = parseMetrics(text);
+  const s = getState(ep.id);
+
+  // Core gauges
+  const running = get(m, 'num_requests_running');
+  const waiting = get(m, 'num_requests_waiting');
+  const kvPerc  = get(m, 'kv_cache_usage_perc') * 100;
+  const promptTotal = get(m, 'prompt_tokens_total');
+  const genTotal    = get(m, 'generation_tokens_total');
+  const cacheQueries = get(m, 'prefix_cache_queries_total');
+  const cacheHits    = get(m, 'prefix_cache_hits_total');
+
+  let stopCount=0,lenCount=0,abortCount=0,errCount=0;
+  for (const [k,v] of Object.entries(m)) {
+    if(k.includes('request_success_total')&&k.includes('finished_reason="stop"'))   stopCount=v;
+    if(k.includes('request_success_total')&&k.includes('finished_reason="length"')) lenCount=v;
+    if(k.includes('request_success_total')&&k.includes('finished_reason="abort"'))  abortCount=v;
+    if(k.includes('request_success_total')&&k.includes('finished_reason="error"'))  errCount=v;
+  }
+  const totalReqs = stopCount+lenCount+abortCount+errCount;
+
+  // Rates
+  let promptTps=0, genTps=0, reqTps=0;
+  if (s.prev && s.prevTime) {
+    const dt = (now - s.prevTime) / 1000;
+    if (dt > 0) {
+      promptTps = Math.max(0, (promptTotal - s.prev.promptTotal) / dt);
+      genTps    = Math.max(0, (genTotal    - s.prev.genTotal)    / dt);
+      reqTps    = Math.max(0, (totalReqs   - s.prev.totalReqs)   / dt);
+    }
+  }
+
+  // Push plain values into history arrays
+  pushVal(s.tsRunning, running);
+  pushVal(s.tsWaiting, waiting);
+  pushVal(s.spPrompt,  promptTps);
+  pushVal(s.spGen,     genTps);
+  pushVal(s.spReq,     reqTps);
+  pushVal(s.spKv,      kvPerc);
+
+  s.prev = { promptTotal, genTotal, totalReqs };
+  s.prevTime = now;
+
+  if (compareMode) {
+    renderCompareCharts();
+    if (!updateUI) return;
+    document.getElementById('last-updated').textContent = 'Updated '+new Date().toLocaleTimeString();
+    document.getElementById('status-dot').className = 'dot';
+    document.getElementById('status-text').textContent = 'Live';
+    return;
+  }
+
+  if (!updateUI) return;
+
+  // Model name
+  const modelMatch = text.match(/model_name="([^"]+)"/);
+  document.getElementById('model-name').textContent = modelMatch ? modelMatch[1] : ep.url;
+  document.title = `${ep.name} — BUZZ Dedicated LLM Endpoint Inference Dashboard`;
+
+  document.getElementById('status-dot').className = 'dot';
+  document.getElementById('status-text').textContent = 'Live';
+
+  // Update stat cards
+  const hitRate = cacheQueries > 0 ? (cacheHits / cacheQueries * 100) : 0;
+  setText('requests-running', running);
+  setText('requests-waiting', waiting);
+  setText('kv-cache', kvPerc.toFixed(1)+'%');
+  setText('kv-sparkline-val', kvPerc.toFixed(1)+'%');
+  document.getElementById('kv-bar').style.width = Math.min(kvPerc,100)+'%';
+  document.getElementById('kv-bar').style.background = kvPerc>80?'#ef4444':kvPerc>60?'#eab308':'#3b82f6';
+  setText('cache-hit-rate', hitRate.toFixed(1)+'%');
+  document.getElementById('cache-bar').style.width = hitRate+'%';
+
+  const ttftBuckets = extractHistogram(m, 'vllm:time_to_first_token_seconds');
+  const ttftCount = get(m,'time_to_first_token_seconds_count') || (ttftBuckets[ttftBuckets.length-1]?.count||1);
+  const ttftSum   = get(m,'time_to_first_token_seconds_sum');
+  const avgTtft   = ttftSum / ttftCount;
+  setText('avg-ttft', avgTtft<1?(avgTtft*1000).toFixed(0)+'ms':avgTtft.toFixed(2)+'s');
+
+  const e2eBuckets = extractHistogram(m, 'vllm:e2e_request_latency_seconds');
+  const e2eCount = get(m,'e2e_request_latency_seconds_count') || (e2eBuckets[e2eBuckets.length-1]?.count||1);
+  const e2eSum   = get(m,'e2e_request_latency_seconds_sum');
+  setText('avg-e2e', (e2eSum/e2eCount).toFixed(2)+'s');
+
+  setText('prompt-tps',  promptTps > 0 ? fmt(promptTps,0)+' t/s' : '—');
+  setText('gen-tps',     genTps    > 0 ? fmt(genTps,0)+' t/s'    : '—');
+  setText('req-per-sec', reqTps    > 0 ? reqTps.toFixed(2)+' r/s': '—');
+
+  // Time series + sparklines
+  resetChartsFromState(s);
+
+  // Outcomes
+  outcomesChart.data.datasets[0].data = [stopCount,lenCount,abortCount,errCount];
+  outcomesChart.update();
+
+  // Histograms
+  if (ttftBuckets.length>0) {
+    const {labels,data} = bucketsToBarData(ttftBuckets.filter(b=>b.le<=10),15);
+    ttftChart.data.labels=labels; ttftChart.data.datasets[0].data=data; ttftChart.update();
+  }
+  if (e2eBuckets.length>0) {
+    const {labels,data} = bucketsToBarData(e2eBuckets.filter(b=>b.le<=60),15);
+    e2eChart.data.labels=labels; e2eChart.data.datasets[0].data=data; e2eChart.update();
+  }
+  const promptBuckets = extractHistogram(m,'vllm:request_prompt_tokens');
+  if (promptBuckets.length>0) {
+    const {labels,data} = bucketsToBarData(promptBuckets,14);
+    promptDistChart.data.labels=labels; promptDistChart.data.datasets[0].data=data; promptDistChart.update();
+  }
+
+  // Health
+  let weightsOffloaded = false;
+  for (const [k,v] of Object.entries(m)) { if(k.includes('weights_offloaded')&&v>0) weightsOffloaded=true; }
+  const preemptions = get(m,'num_preemptions_total');
+  setBadge('hc-engine',  'Awake', 'healthy');
+  setBadge('hc-queue',   waiting===0?'Clear':`${waiting} queued`, waiting>10?'error':waiting>0?'warning':'healthy');
+  setBadge('hc-preempt', preemptions===0?'None':preemptions+' total', preemptions>0?'warning':'healthy');
+  setBadge('hc-errors',  errCount===0?'None':errCount+' errors', errCount>0?'error':'healthy');
+  setBadge('hc-weights', weightsOffloaded?'Offloaded':'Loaded', weightsOffloaded?'warning':'healthy');
+
+  // Totals
+  const promptCount = get(m,'request_prompt_tokens_count')||1;
+  const promptSum   = get(m,'request_prompt_tokens_sum');
+  const genCount2   = get(m,'request_generation_tokens_count')||1;
+  const genSum2     = get(m,'request_generation_tokens_sum');
+  setText('lt-total',      fmt(totalReqs,0));
+  setText('lt-prompt',     fmt(promptTotal,0));
+  setText('lt-gen',        fmt(genTotal,0));
+  setText('lt-avg-prompt', Math.round(promptSum/promptCount)+' tokens');
+  setText('lt-avg-gen',    Math.round(genSum2/genCount2)+' tokens');
+
+  // Process info
+  const startTime = get(m,'process_start_time_seconds');
+  setText('pi-uptime', fmtDuration(now/1000 - startTime));
+  setText('pi-cpu',    fmtDuration(get(m,'process_cpu_seconds_total')));
+  setText('pi-rss',    (get(m,'process_resident_memory_bytes')/1e9).toFixed(2)+' GB');
+  setText('pi-vmem',   (get(m,'process_virtual_memory_bytes')/1e9).toFixed(1)+' GB');
+  setText('pi-fds',    get(m,'process_open_fds'));
+
+  document.getElementById('last-updated').textContent = 'Updated '+new Date().toLocaleTimeString();
+}
+
+// ── Boot ──────────────────────────────────────────────────────────
+initCharts();
+renderTabs();
+if (activeId) {
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('dashboard').style.display = '';
+  fetchAndUpdate();
+} else {
+  showEmpty();
+}
+</script>
+</body>
+</html>
